@@ -24,6 +24,17 @@ pub trait TaskDispatcher {
     fn update_config(&mut self, _cfg: &mut AgentConfig) {}
 }
 
+/// Loop principal del agente (beaconing).
+///
+/// PASOS A IMPLEMENTAR:
+/// 1. Conectar el transporte (transport.connect())
+/// 2. Loop infinito con contador de iteraciones:
+///    a. Obtener request de checkin del dispatcher
+///    b. Enviar checkin y recibir datos (transport.checkin)
+///    c. Si hay datos entrantes, hacer dispatch y enviar resultado
+///    d. Actualizar configuración del dispatcher
+///    e. Calcular sleep con jitter y dormir
+/// 3. Salir si se alcanza max_iterations (para tests)
 pub fn run_loop<T: Transport, D: TaskDispatcher, R: Rng>(
     transport: &mut T,
     dispatcher: &mut D,
@@ -31,36 +42,31 @@ pub fn run_loop<T: Transport, D: TaskDispatcher, R: Rng>(
     rng: &mut R,
     max_iterations: Option<u64>,
 ) -> Result<(), RuntimeError> {
-    transport.connect()?;
-
-    let mut iter: u64 = 0;
-    loop {
-        if let Some(max) = max_iterations {
-            if iter >= max {
-                #[cfg(debug_assertions)]
-                {
-                    eprintln!("run_loop exit: max_iterations reached ({})", max);
-                }
-                return Ok(());
-            }
-        }
-        iter += 1;
-
-        let req = dispatcher.checkin_request();
-        let inbound = transport.checkin(&req)?;
-        if !inbound.is_empty() {
+    /*
+    ============================================================
+    WORKSHOP: Implementar el loop principal del agente
+    ============================================================
+    
+    Estructura:
+    1. transport.connect()? - conectar al C2
+    2. let mut iter: u64 = 0;
+    3. loop {
+        - Verificar max_iterations para salir en tests
+        - iter += 1;
+        - let req = dispatcher.checkin_request();
+        - let inbound = transport.checkin(&req)?;
+        - if !inbound.is_empty() {
             if let Some(out) = dispatcher.dispatch(inbound)? {
                 transport.send_result(&out)?;
             }
         }
-
-        dispatcher.update_config(cfg);
-
-        let sleep_ms = jittered_sleep_ms(cfg.sleep.as_millis() as u64, cfg.jitter_pct, rng);
-        if sleep_ms > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
-        }
+        - dispatcher.update_config(cfg);
+        - let sleep_ms = jittered_sleep_ms(cfg.sleep.as_millis() as u64, cfg.jitter_pct, rng);
+        - std::thread::sleep(Duration::from_millis(sleep_ms));
     }
+    ============================================================
+    */
+    todo!("Implementar run_loop con beaconing")
 }
 
 #[cfg(test)]

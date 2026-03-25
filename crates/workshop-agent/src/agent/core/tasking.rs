@@ -18,12 +18,20 @@ const COMMAND_ID_WORKSHOP_SET_BEACON: u32 = 9001;
 const TLV_TYPE_WORKSHOP_SLEEP_MS: u32 = 0x2001_0001;
 const TLV_TYPE_WORKSHOP_JITTER_PCT: u32 = 0x2001_0002;
 
+/// Extrae un u32 big-endian de un TLV por tipo.
 pub fn get_u32_be(tlvs: &[MpTlv], typ: u32) -> Option<u32> {
-    let t = tlvs.iter().find(|t| t.typ == typ)?;
-    if t.value.len() < 4 {
-        return None;
-    }
-    Some(u32::from_be_bytes([t.value[0], t.value[1], t.value[2], t.value[3]]))
+    /*
+    ============================================================
+    WORKSHOP: Implementar extracción de u32 de TLV
+    ============================================================
+    
+    Pasos:
+    1. Buscar el TLV con el tipo dado: tlvs.iter().find(|t| t.typ == typ)?
+    2. Verificar que value.len() >= 4
+    3. Retornar u32::from_be_bytes([value[0], value[1], value[2], value[3]])
+    ============================================================
+    */
+    todo!("Implementar get_u32_be")
 }
 
 fn tlv_uint(typ: u32, v: u32) -> MpTlv {
@@ -58,65 +66,50 @@ pub struct DispatchResult {
     pub new_jitter_pct: Option<u8>,
 }
 
+/// Dispatcher de comandos del C2.
+///
+/// Comandos soportados:
+/// - COMMAND_ID_CORE_NEGOTIATE_TLV_ENCRYPTION (16): Negociar clave AES
+/// - COMMAND_ID_STD_PWD (1001): Obtener directorio actual
+/// - COMMAND_ID_WORKSHOP_SET_BEACON (9001): Actualizar sleep/jitter
+///
+/// PASOS A IMPLEMENTAR:
+/// 1. Extraer el command ID con get_u32_be(tlvs, TLV_TYPE_COMMAND_ID)
+/// 2. Match sobre el command ID:
+///    - Negotiate: generar clave AES aleatoria, retornar TLV con key
+///    - StdPwd: obtener current_dir, retornar como wstring
+///    - SetBeacon: extraer sleep_ms y jitter_pct, actualizar
+///    - Default: retornar ERROR_NOT_SUPPORTED
 pub fn dispatch_tlvs(tlvs: &[MpTlv]) -> DispatchResult {
+    /*
+    ============================================================
+    WORKSHOP: Implementar dispatcher de comandos
+    ============================================================
+    
+    Estructura del match:
+    
     let cmd_id = get_u32_be(tlvs, TLV_TYPE_COMMAND_ID).unwrap_or(0);
     match cmd_id {
         COMMAND_ID_CORE_NEGOTIATE_TLV_ENCRYPTION => {
-            let mut key = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut key);
-            DispatchResult {
-                result: ERROR_SUCCESS,
-                tlvs: vec![
-                    tlv_uint(TLV_TYPE_SYM_KEY_TYPE, ENC_FLAG_AES256),
-                    tlv_raw(TLV_TYPE_SYM_KEY, &key),
-                ],
-                new_aes_key: Some(key),
-                new_sleep_ms: None,
-                new_jitter_pct: None,
-            }
+            - let mut key = [0u8; 32];
+            - rand::thread_rng().fill_bytes(&mut key);
+            - Retornar DispatchResult con new_aes_key: Some(key)
+              y tlvs con TLV_TYPE_SYM_KEY_TYPE y TLV_TYPE_SYM_KEY
         }
         COMMAND_ID_STD_PWD => {
-            let pwd = std::env::current_dir()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            DispatchResult {
-                result: ERROR_SUCCESS,
-                tlvs: vec![tlv_wstring(TLV_TYPE_STRING, &pwd)],
-                new_aes_key: None,
-                new_sleep_ms: None,
-                new_jitter_pct: None,
-            }
+            - let pwd = std::env::current_dir()...
+            - Retornar DispatchResult con TLV_TYPE_STRING (wstring)
         }
         COMMAND_ID_WORKSHOP_SET_BEACON => {
-            let sleep_ms = get_u32_be(tlvs, TLV_TYPE_WORKSHOP_SLEEP_MS);
-            let jitter_raw = get_u32_be(tlvs, TLV_TYPE_WORKSHOP_JITTER_PCT);
-            let jitter_pct = jitter_raw.and_then(|v| u8::try_from(v).ok());
-
-            let mut ack = String::from("beacon updated");
-            if let Some(ms) = sleep_ms {
-                ack.push_str(&format!(" sleep_ms={}", ms));
-            }
-            if let Some(j) = jitter_pct {
-                ack.push_str(&format!(" jitter_pct={}", j));
-            }
-
-            DispatchResult {
-                result: ERROR_SUCCESS,
-                tlvs: vec![tlv_wstring(TLV_TYPE_STRING, &ack)],
-                new_aes_key: None,
-                new_sleep_ms: sleep_ms,
-                new_jitter_pct: jitter_pct,
-            }
+            - Extraer sleep_ms con get_u32_be(tlvs, TLV_TYPE_WORKSHOP_SLEEP_MS)
+            - Extraer jitter_pct (convertir a u8)
+            - Retornar DispatchResult con new_sleep_ms y new_jitter_pct
         }
-        _ => DispatchResult {
-            result: ERROR_NOT_SUPPORTED,
-            tlvs: Vec::new(),
-            new_aes_key: None,
-            new_sleep_ms: None,
-            new_jitter_pct: None,
-        },
+        _ => DispatchResult { result: ERROR_NOT_SUPPORTED, ... }
     }
+    ============================================================
+    */
+    todo!("Implementar dispatch_tlvs")
 }
 
 #[cfg(test)]
