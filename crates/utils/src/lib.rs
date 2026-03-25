@@ -12,12 +12,11 @@ use win_types::*;
 use alloc::sync::Arc;
 use alloc::ffi::CString;
 use core::ffi::c_void;
-// HINT: Necesitaremos core::arch::asm para leer el registro gs
-// use core::arch::asm;
+use core::arch::asm;
 use std::{ptr::NonNull,sync::Mutex};
 
-const IMAGE_DOS_SIGNATURE: u16 = 0x5A4D;  // "MZ" en little-endian
-const IMAGE_NT_SIGNATURE: u32 = 0x4550;   // "PE\0\0"
+const IMAGE_DOS_SIGNATURE: u16 = 0x5A4D;
+const IMAGE_NT_SIGNATURE: u32 = 0x4550;
 type LoadLibraryA = extern "system" fn(lpLibFileName: *const i8) -> *const c_void;
 
 
@@ -89,15 +88,16 @@ unsafe {
 
 /// Lee el registro gs en el offset especificado.
 /// En x64 Windows, gs:[0x60] apunta al PEB (Process Environment Block).
-///
-/// TODO: Implementar usando asm! macro para leer el registro.
-/// Hint: usar "mov {}, gs:[{}]" con out(reg) e in(reg)
 fn __readgsqword(offset: u64) -> u64 {
-    // TODO: Implementar lectura del registro gs
-    // let out: u64;
-    // unsafe { asm!(...) }
-    // return out;
-    todo!("Implementar lectura de gs register con asm!")
+    let out: u64;
+    unsafe {
+        asm!(
+            "mov {}, gs:[{}]",
+            out(reg) out,
+            in(reg) offset,
+        );
+    }
+    out
 }
 
 
@@ -106,14 +106,6 @@ fn __readgsqword(offset: u64) -> u64 {
 ///Get a [`HMODULE`] to module in the peb.
 /// New modules will be add to an array, otherwise it will increment the reference counter.
 /// It queries the 0x60 gs register, go through the InMemoryOrderModuleList looking for a Module name provided to the function and return a pointer to the base address of the module.
-///
-/// PASOS A IMPLEMENTAR:
-/// 1. Obtener el PEB desde gs:[0x60]
-/// 2. Acceder a PEB->Ldr (PEB_LDR_DATA)
-/// 3. Iterar InMemoryOrderModuleList (LIST_ENTRY doblemente enlazada)
-/// 4. Para cada entrada, obtener LDR_DATA_TABLE_ENTRY
-/// 5. Comparar BaseDllName con el nombre buscado
-/// 6. Retornar DllBase cuando se encuentre
 #[allow(non_snake_case)]
 pub fn GetModuleHandle(ModuleName: Option<&str>)-> Option<Arc<Mutex<HMODULE>>>{
 let mut modules_array  = match MODULES.lock(){
@@ -143,28 +135,46 @@ for module_mutex in modules_array.iter(){
     }
  
 
-/*
-============================================================
-WORKSHOP: Implementar PEB Walking aquí
-============================================================
+let MyPeb: *const PEB = __readgsqword(0x60) as *const PEB;
 
-Pasos:
-1. let MyPeb: *const PEB = __readgsqword(0x60) as *const PEB;
-2. let pLDR: &PEB_LDR_DATA = unsafe{ &*(*MyPeb).Ldr };
-3. let List: &LIST_ENTRY = &(*pLDR).InMemoryOrderModuleList;
-4. Iterar la lista:
-   - let pFirst: &LIST_ENTRY = unsafe {&*(*List).Flink};
-   - let mut iterator: &LIST_ENTRY = pFirst;
-   - while iterator != List { ... }
-5. Para cada entrada:
-   - let pEntry: *const LDR_DATA_TABLE_ENTRY = ((iterator as *const LIST_ENTRY) as usize - 16) as *const LDR_DATA_TABLE_ENTRY;
-   - Comparar (*pEntry).BaseDllName.to_string() con ModuleName
-   - Si coincide, crear HMODULE y agregar al cache
+let pLDR: *const PEB_LDR_DATA = unsafe {(*MyPeb).Ldr};
 
-Hint: el offset 16 es el tamaño de los campos antes de InMemoryOrderLinks en LDR_DATA_TABLE_ENTRY
-============================================================
-*/
+let pLDR: &PEB_LDR_DATA = unsafe{ &*(*MyPeb).Ldr};
 
+let List: &LIST_ENTRY = &(*pLDR).InMemoryOrderModuleList;
+
+let pFirst: &LIST_ENTRY = unsafe {&*(*List).Flink};
+let mut iterator: &LIST_ENTRY = pFirst;
+let lsize: usize = 16;
+while iterator != List{
+
+
+let pEntry: *const LDR_DATA_TABLE_ENTRY = ((iterator as *const LIST_ENTRY) as usize - lsize) as *const LDR_DATA_TABLE_ENTRY;
+
+unsafe {  
+let toutf8: String = match (*pEntry).BaseDllName.to_string(){
+        Some(utf8) => utf8,
+        None =>{ println!("Something happened here"); 
+    return None}
+};
+
+if toutf8.eq_ignore_ascii_case(ModuleName.unwrap_or_default()) {
+    let current_module: HMODULE = HMODULE{
+    Name:  toutf8,
+    Addr: (*pEntry).DllBase as usize,
+    pe: None
+    };
+    let arc_module= Arc::new(Mutex::new(current_module));
+    modules_array.push(arc_module.clone());
+    return Some(arc_module);
+}
+}
+
+
+
+
+iterator = unsafe{&*(*iterator).Flink};
+}
 return None;
 }
 
@@ -209,39 +219,40 @@ pub fn RVA(base: usize, rva: usize) -> usize {
 impl HMODULE {
 
 /// Parsea el PE para obtener los punteros a las secciones importantes.
-///
-/// PASOS A IMPLEMENTAR:
-/// 1. Verificar si ya fue parseado (self.pe.is_some())
-/// 2. Obtener DOS header: self.Addr as *const IMAGE_DOS_HEADER
-/// 3. Verificar firma MZ (0x5A4D)
-/// 4. Obtener NT headers: base + e_lfanew
-/// 5. Verificar firma PE (0x4550)
-/// 6. Obtener OptionalHeader y DataDirectory[0] (Export Directory)
-/// 7. Calcular RVA al Export Directory
-/// 8. Poblar struct PE con NonNull pointers
 #[allow(non_snake_case)]
 pub fn GetPESections(&mut self)->Result<bool,bool>{
-    // TODO: Verificar si ya está parseado
-    // if self.pe.is_some() { return Err(false); }
+    if self.pe.is_some(){
+        return Err(false);
+    }
     
-    /*
-    ============================================================
-    WORKSHOP: Implementar parseo de PE headers
-    ============================================================
-    
-    Pasos:
-    1. let dos_pointer: *const IMAGE_DOS_HEADER = self.Addr as *const IMAGE_DOS_HEADER;
-    2. Verificar (*dos_pointer).e_magic == IMAGE_DOS_SIGNATURE
-    3. let nt_pointer = RVA(self.Addr, (*dos_pointer).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
-    4. Verificar (*nt_pointer).Signature == IMAGE_NT_SIGNATURE
-    5. let pDataDirectory = &(*nt_pointer).OptionalHeader.DataDirectory[0];
-    6. let export_dir = RVA(self.Addr, pDataDirectory.VirtualAddress as usize) as *const IMAGE_EXPORT_DIRECTORY;
-    7. self.pe = Some(PE { ... });
-    
-    Hint: Usar NonNull::new(ptr as *mut _).unwrap() para crear los NonNull
-    ============================================================
-    */
-    
+    let dos_pointer: *const IMAGE_DOS_HEADER =  self.Addr as *const IMAGE_DOS_HEADER;
+    let pIMAGE_DOS_HEADER: &IMAGE_DOS_HEADER = unsafe{ &*dos_pointer};
+
+    let nt_pointer: *const IMAGE_NT_HEADERS64 = RVA(self.Addr , (*pIMAGE_DOS_HEADER).e_lfanew as usize) as *const IMAGE_NT_HEADERS64;
+    let pIMAGE_NT_HEADERS: &IMAGE_NT_HEADERS64  = unsafe {&*nt_pointer}; 
+
+    if (*pIMAGE_DOS_HEADER).e_magic != IMAGE_DOS_SIGNATURE{
+       return Err(false)
+    }
+    if (*pIMAGE_NT_HEADERS).Signature != IMAGE_NT_SIGNATURE{
+      return Err(false)
+    }
+
+    let pOptionalHeader: &IMAGE_OPTIONAL_HEADER64 = &(*pIMAGE_NT_HEADERS).OptionalHeader;
+    let optional_pointer: *const IMAGE_OPTIONAL_HEADER64 = &(*pIMAGE_NT_HEADERS).OptionalHeader as *const IMAGE_OPTIONAL_HEADER64;
+
+    let data_pointer: *const IMAGE_DATA_DIRECTORY = &(*pOptionalHeader).DataDirectory[0] as *const IMAGE_DATA_DIRECTORY;
+    let pDataDirectory: &IMAGE_DATA_DIRECTORY = &(*pOptionalHeader).DataDirectory[0];
+
+    let Export_pointer: *const IMAGE_EXPORT_DIRECTORY = RVA(self.Addr , pDataDirectory.VirtualAddress as usize) as *const IMAGE_EXPORT_DIRECTORY;
+
+    self.pe = Some(PE {
+    dos_header: NonNull::new(dos_pointer as *mut IMAGE_DOS_HEADER).unwrap(),
+    nt_header: NonNull::new(nt_pointer as *mut IMAGE_NT_HEADERS64).unwrap(), 
+    optional_header: NonNull::new(optional_pointer as *mut IMAGE_OPTIONAL_HEADER64).unwrap(),
+    data_directory: NonNull::new(data_pointer as *mut IMAGE_DATA_DIRECTORY).unwrap(),
+    export_directory: NonNull::new(Export_pointer as *mut IMAGE_EXPORT_DIRECTORY).unwrap() });
+
    return Ok(true);
 }
 
@@ -259,65 +270,96 @@ pub fn is_parsed(&self)-> Result<bool,bool>{
 }
 
 /// Verifica si una dirección de función es un "forwarder" (apunta a otra DLL).
-/// Los forwarders están dentro del rango del Export Directory.
-///
-/// Si es forwarder: parsea "DLLNAME.FuncName" y resuelve recursivamente.
-/// Si no: retorna Err(false) para usar la dirección original.
 pub fn get_forwarder(base_address: usize, ddirectory_va: usize, ddirectory_size: usize, funcaddr: *const c_void) -> Result<*const c_void, bool> {
-    /*
-    ============================================================
-    WORKSHOP: Implementar detección de forwarders
-    ============================================================
-    
-    Un forwarder ocurre cuando funcaddr está DENTRO del export directory:
-    base_address + ddirectory_va <= funcaddr < base_address + ddirectory_va + ddirectory_size
-    
-    Si es forwarder:
-    1. let forwarder_string = CStr::from_ptr(funcaddr as *const i8).to_str()
-    2. Parsear "DLLNAME.FuncName" (split en '.')
-    3. Resolver el módulo con GetModuleHandle o LoadLibrary
-    4. Resolver la función con GetProcAddress recursivamente
-    ============================================================
-    */
+    unsafe {
+        if ((funcaddr as usize) < (base_address + ddirectory_va + ddirectory_size) as usize) && ((funcaddr as usize) > (base_address + ddirectory_va) as usize) {
+            #[cfg(debug_assertions)] {
+                print!("This is forwarder\n");
+            }
+            let forwarder_string = core::ffi::CStr::from_ptr(funcaddr as *const i8).to_str().unwrap();
+            #[cfg(debug_assertions)] {
+                print!("This is the forwarder string: {}\n", forwarder_string);
+            }
+            let mut iterator = forwarder_string.split(".");
+            let module_name = iterator.next().unwrap();
+            let module_name = (module_name.to_owned() + ".dll").to_string();
+            let function_name = iterator.next().unwrap();
+            #[cfg(debug_assertions)] {
+                print!("This is the module name: {}\n", module_name);
+                print!("This is the function name: {}\n", function_name);
+            }
+            let opmodule = match GetModuleHandle(Some(&module_name)) {
+                Some(p) => Some(p),
+                None => LoadLibrary(&module_name)
+            };
+            if opmodule.is_none() {
+                println!("Module not found");
+                return Err(false);
+            }
+            let module = opmodule.unwrap();
+            let func = GetProcAddress(module, function_name);
+            if func.is_none() {
+                println!("Function not found");
+                return Err(false);
+            }
+            let func = func.unwrap();
+            return Ok(func);
+        }
+    }
     Err(false)
 }
 
 
 /// Busca una función por nombre en el Export Table de un módulo.
-///
-/// PASOS A IMPLEMENTAR:
-/// 1. Obtener el módulo del mutex y verificar si está parseado
-/// 2. Obtener punteros del Export Directory:
-///    - AddressOfNames (array de RVA a strings)
-///    - AddressOfNameOrdinals (array de ordinales)
-///    - AddressOfFunctions (array de RVA de funciones)
-/// 3. Iterar por NumberOfNames, comparando strings
-/// 4. Cuando se encuentre, usar el ordinal para obtener el índice en AddressOfFunctions
-/// 5. Calcular la dirección final: base + AddressOfFunctions[ordinal]
-/// 6. Verificar si es forwarder con get_forwarder()
 pub fn GetProcAddress(hmodule: Arc<Mutex<HMODULE>>, ProcName: &str) -> Option<*const c_void> {
-    /*
-    ============================================================
-    WORKSHOP: Implementar resolución de exports
-    ============================================================
-    
-    Pasos:
-    1. let module = hmodule.lock().ok()?;
-    2. Si module.pe.is_none(), llamar module.GetPESections()
-    3. let ppe = module.pe.as_ref()?;
-    4. Obtener punteros:
-       - pName = RVA(address, export_dir.AddressOfNames) as *const u32
-       - pOrdinals = RVA(address, export_dir.AddressOfNameOrdinals) as *const u16
-       - pFuncs = RVA(address, export_dir.AddressOfFunctions) as *const u32
-    5. for n in 0..NumberOfNames:
-       - let name = CStr::from_ptr(RVA(address, *pName.add(n)))
-       - if name == ProcName:
-         - let ordinal = *pOrdinals.add(n)
-         - let funcaddr = RVA(address, *pFuncs.add(ordinal as usize))
-         - Verificar forwarder
-         - return Some(funcaddr)
-    ============================================================
-    */
+    let mut address = 0;
+    let pName: *const u32;
+    let pOrdinals: *const u16;
+    let pFuncs: *const u32;
+    let number_of_names: u32;
+    let mut ddirectory_va = 0;
+    let mut ddirectory_size = 0;
+    {
+        let p = hmodule.lock();
+        if p.is_err() {
+            return None;
+        }
+        let mut module = p.unwrap();
+        
+        if module.pe.is_none() {
+            module.GetPESections();   
+        }
+        let ppe = match &module.pe {
+            Some(pe) => pe,
+            None => return None
+        };
+        address = module.Addr;
+        pName = unsafe { RVA(address, ppe.export_directory.as_ref().AddressOfNames as usize) as *const u32 };
+        pOrdinals = unsafe { RVA(address, ppe.export_directory.as_ref().AddressOfNameOrdinals as usize) as *const u16 };
+        pFuncs = unsafe { RVA(address, ppe.export_directory.as_ref().AddressOfFunctions as usize) as *const u32 };
+        number_of_names = unsafe { ppe.export_directory.as_ref().NumberOfNames };
+        ddirectory_va = unsafe { ppe.data_directory.as_ref().VirtualAddress as usize };
+        ddirectory_size = unsafe { ppe.data_directory.as_ref().Size as usize };
+    }
+
+    unsafe {
+        for n in 0..number_of_names {
+            let funcname = core::ffi::CStr::from_ptr((address + *pName.add(n as usize) as usize) as *const i8);
+            let str = funcname.to_str().unwrap_or_default();
+            if str == ProcName {
+                let funcaddr: *const c_void = (address + *pFuncs.add(*pOrdinals.add(n as usize) as usize) as usize) as *const c_void;
+                let funcaddr = match get_forwarder(address, ddirectory_va, ddirectory_size, funcaddr) {
+                    Ok(p) => p,
+                    Err(_) => funcaddr
+                };
+                #[cfg(debug_assertions)] {
+                    print!("RVA to Function: {:x}\n", *pFuncs.add(*pOrdinals.add(n as usize) as usize) as u32);
+                    print!("Function {:p}\n", funcaddr);
+                }
+                return Some(funcaddr);
+            }
+        }
+    }
     None
 }
     
