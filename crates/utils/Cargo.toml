@@ -1,0 +1,13 @@
+[package]
+name = "get-proc"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+name = "get_proc"
+path = "src/lib.rs"
+
+[dependencies]
+
+

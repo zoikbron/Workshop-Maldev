@@ -1,0 +1,15 @@
+[package]
+name = "c2-core"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rand = "0.8"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+cipher = { version = "0.4", features = ["alloc"] }
+

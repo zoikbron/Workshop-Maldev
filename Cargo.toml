@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/utils",
+    "crates/workshop-agent",
+    "crates/workshop-server",
+]
+
+[profile.release]
+panic = "abort"

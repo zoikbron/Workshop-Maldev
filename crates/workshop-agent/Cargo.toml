@@ -1,0 +1,29 @@
+[package]
+name = "workshop-agent"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+
+[lib]
+name = "workshop_agent"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["exe", "http_winhttp"]
+exe = []
+dll = []
+http_winhttp = []
+
+[[bin]]
+name = "workshop_agent_exe"
+path = "src/bin/agent_exe.rs"
+required-features = ["exe", "http_winhttp"]
+
+[dependencies]
+core_defs = { package = "c2-core", path = "../core" }
+get_proc = { package = "get-proc", path = "../utils" }
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

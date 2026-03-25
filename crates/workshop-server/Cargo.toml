@@ -1,0 +1,16 @@
+[package]
+name = "workshop-server"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "workshop_server"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1.47.1", features = ["full"] }
+clap = { version = "4.5.48", features = ["derive", "string"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+core_defs = { package = "c2-core", path = "../core" }
